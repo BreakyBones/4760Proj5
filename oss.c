@@ -18,7 +18,7 @@
 #define oneSec 1000000000 // Definition of one second in NanoSeconds
 #define MAX_RS 10 // Maximum Resources
 #define MAX_IN 20 // Maximum Instances of those Resources
-#define MAX_PROC 18 // Maximum number of Processes allowed
+#define MAX_PROC 100 // Maximum number of Processes allowed
 #define INCR 1000000 // How much the clock should increment
 bool alarmTO = false; // Is the Alarm Going
 bool ctrlTO = false; // Did the user press Ctrl to quit
@@ -36,7 +36,7 @@ typedef struct msgbuffer {
     int reqOrRel;
     int resourceAm;
     pid_t cPid;
-};
+} msgbuffer;
 
 // Process Table
 struct PCB {
@@ -245,4 +245,133 @@ void print_usage(){
     printf("-s: Defines how many workers are allowed to run simultaneously\n");
     printf("-i: How often a worker should be launched (in milliseconds)\n");
     printf("-f: Name of the arg_f the user wishes to write to\n");
+}
+
+// Main Function Starts Now yeehaw
+int main(int argc, char** argv) {
+    //signals for TO handle
+    signal(SIGALRM, alarmSignalHandler);
+    signal(SIGINT, ctrlHandler);
+
+    // New workers should only be dispatched for 5 seconds
+    alarm(5);
+
+    int proc, simul, opt;
+    int randSec, randNano;
+    int timeToLaunch;
+    char* logFile;
+    int shmid, msqid;
+    struct Clock *clockPointer;
+
+    // getopt commands
+    while((opt = getopt(argc, argv, "hn:s:t:f:")) != 1) {
+        switch(opt) {
+            case 'h':
+                print_usage();
+                return EXIT_SUCCESS;
+            case 'n':
+                proc = atoi(optarg);
+                break;
+            case 's':
+                simul = atoi(optarg);
+                break;
+            case 'i':
+                timeToLaunch = atoi(optarg);
+                break;
+            case 'f':
+                logFile = optarg;
+                break;
+            case '?':
+                print_usage();
+                return EXIT_FAILURE;
+            default:
+                break;
+        }
+    }
+
+    // check if all were used
+    if (proc <= 0 || simul <= 0 || timeToLaunch <= 0 || logFile == NULL) {
+        printf("OSS: All Arguments are Required");
+        print_usage();
+
+        return EXIT_FAILURE;
+    }
+
+    // Check if the number of Sim Processes is greater than 18 as detailed in the Project Requirements
+    if(simul > 18) {
+        printf("OSS: The number of simultaneous processes must be greater than 0 and less than 19\n");
+        return EXIT_FAILURE;
+    }
+
+    // create process table and resource table
+    struct PCB processTable[proc];
+    struct rTable resourceTable[MAX_RS];
+
+    // Initialize Process and Resource Table
+    for (int i = 0; i < proc; i++) {
+        processTable[i].occupied = 0;
+        processTable[i].pid = 0;
+        processTable[i].startSeconds = 0;
+        processTable[i].startNano = 0;
+        for (int j = 0; j < MAX_RS; j++) {
+            processTable[i].allocationTable[j] = 0;
+        }
+        processTable[i].resourceNeeded = -1;
+    }
+
+    for (int i = 0; i < MAX_RS; i++) {
+        resourceTable[i].available = MAX_IN;
+    }
+
+    // Allocation of memory for clock
+    shmid = shmget(SHMKEY, sizeof(struct Clock), 0666 | IPC_CREAT);
+    if (shmid == -1) {
+        perror("OSS: Error in SHMGET");
+        exit(1);
+    }
+
+    // Attach Clock to SHM
+    clockPointer = (struct Clock *)shmat(shmid, 0, 0);
+    if (clockPointer == (struct Clock *)-1) {
+        perror("OSS: Error in SHMAT");
+        exit(1);
+    }
+
+    // Initialization of Clock
+    clockPointer->seconds = 0;
+    clockPointer->nanoSeconds = 0;
+
+    // Creation of Message Queue
+    msgbuffer buf;
+    key_t key;
+    system("touch msgq.txt");
+
+    // get key for message queue
+    if ((key = ftok("msgq.txt", 1)) == -1) {
+        perror("OSS: FTOK error\n");
+        exit(1);
+    }
+
+    if ((msqid = msgget(key, 0666 | IPC_CREAT)) == -1) {
+        perror("OSS: Error in MSGGET\n");
+        exit(1);
+    }
+    printf("OSS: Message Queue Established");
+
+    // Variables used in Main Loop
+    int workers = 0;
+    int activeWorkers = 0;
+    bool childrenInSystem = false;
+    int termWorker = 0;
+    int copyNano = clockPointer->nanoSeconds;
+
+    // Stats
+    int immRequest = 0;
+    int blockRequest = 0;
+    int deadlockTerm = 0;
+    int deadlockDetectionCount = 0;
+    int deadlockProcesses = 0;
+
+    // LOOP
+
 }
