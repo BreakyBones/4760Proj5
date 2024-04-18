@@ -163,3 +163,86 @@ void logAvailReso(const char* logFile, struct rTable* resourceTable) {
     }
     lineCount += 2;
 }
+
+// Deadlock Algorithm
+struct DeadlockInfo {
+    bool isDeadlock;
+    int deadlockedProc[MAX_PROC];
+    int count;
+};
+
+// Requesting resources
+bool reqIfAval(const int *req, const int *aval, const int pnum, const int numRes) {
+
+    int i = 0;
+    //Iterate through resources
+    for (; i < numRes; i++) {
+        if (req[i] > aval[i]) {
+            break;
+        }
+    }
+    return (i == numRes);
+}
+
+struct DeadlockInfo deadlock(struct rTable* resourceTable, const int m, const int n, struct PCB* procTable) {
+    struct DeadlockInfo deadlockInfo;
+    deadlockInfo.isDeadlock = false;
+    deadlockInfo.count = 0;
+    int work[m];
+    bool finish[n];
+    int allocated[n][m];
+    int request[n][m];
+
+    for (int i = 0; i < m; i++) {
+        work[i] = resourceTable[i].available;
+    }
+
+    for (int i = 0; i < n; i++) {
+        finish[i] = false;
+    }
+
+    for (int i = 0; i < n; i++) {
+        for (int j = 0; j < m; j++) {
+            if (procTable[i].resourceNeeded == j) {
+                request[i][j] = 1;
+            } else {
+                request[i][j] = 0;
+            }
+            allocated[i][j] = procTable[i].allocationTable[j];
+        }
+    }
+    int p = 0;
+
+    for (p = 0; p < n; p++) {
+        if (finish[p]) continue;
+
+        if (reqIfAval(request[p], work, p, m)) {
+            finish[p] = true;
+
+            // release all resources held by process
+            for (int i = 0; i < m; i++) {
+                work[i] += allocated[p][i];
+            }
+            p = -1; // Reset loop and check again
+        }
+    }
+
+    // Check for stuck processes that could not finish, i.e. Deadlocked
+    for (p = 0; p < n; p++) {
+        if  (!finish[p]) {
+            deadlockInfo.isDeadlock = true;
+            deadlockInfo.deadlockedProc[deadlockInfo.count++] = p; // store process index
+        }
+    }
+    return deadlockInfo;
+}
+
+// Help Function
+void print_usage(){
+    printf("Usage for OSS: -n <n_value> -s <s_value> -i <i_value> -f <fileName>\n");
+    printf("Options:\n");
+    printf("-n: stands for the total number of workers to launch\n");
+    printf("-s: Defines how many workers are allowed to run simultaneously\n");
+    printf("-i: How often a worker should be launched (in milliseconds)\n");
+    printf("-f: Name of the arg_f the user wishes to write to\n");
+}
