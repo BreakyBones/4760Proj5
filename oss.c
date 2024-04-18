@@ -373,5 +373,86 @@ int main(int argc, char** argv) {
     int deadlockProcesses = 0;
 
     // LOOP
+    while ((workers < proc || childrenInSystem == true) && !ctrlTO) {
+        // non blocking waitpid to check if children have terminated
+        int status;
+        int terminatingPid = waitpid(-1, &status, WNOHANG);
 
+        // if a child has terminated free resources and update active children and terms of workers
+        if (terminatingPid > 0) {
+            for (int i = 0; i < proc; i++) {
+                if (processTable[i].pid == terminatingPid) {
+                    processTable[i].occupied = 0;
+                    processTable[i].resourceNeeded = -1;
+
+                    // free resources
+                    int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                    for (int j = 0; j < MAX_RS; j++) {
+                        resourceTable[j].available += processTable[i].allocationTable[j];
+                        terminatedR[j] = processTable[i].allocationTable[j];
+                        processTable[i].allocationTable[j] = 0;
+                    }
+
+                    char mess1[256], mess2[256];
+                    sprintf(mess1 , "-> OSS: Worker %d TERMINATED\n", processTable[i].pid);
+                    printf("%s", mess1);
+                    logMessage(logFile, mess1);
+
+                    printf("\tResources Released: ");
+                    for (int j = 0; j < MAX_RS; j++) {
+                        if (terminatedR[j] != 0) {
+                            sprintf(mess2, "r%d:%d; ", j, terminatedR[j]);
+                            printf("%s", mess2);
+                            logMessage(logFile , mess2);
+                        }
+                    }
+                    printf("\n");
+                    logMessage(logFile, "\n");
+                }
+            }
+            termWorker++;
+            activeWorkers--;
+        }
+        if (termWorker == proc) {
+            childrenInSystem = false;
+        }
+
+        incrementClock(clockPointer, INCR);
+
+        if ((clockPointer->nanoSeconds % (int)(oneSec / 2)) == 0) {
+            procTableDisplay(logFile, clockPointer, processTable, proc);
+            logAvailReso(logFile, resourceTable);
+        }
+
+        int copyCount = immRequest + blockRequest;
+        int newCount = 0;
+
+        if (copyCount != 0 && copyCount != newCount) {
+            if (((immRequest + blockRequest) % 20) == 0) {
+                procTableDisplay(logFile, clockPointer, processTable, proc);
+            }
+            newCount = immRequest + blockRequest;
+        }
+
+        // run deadlock detection every second. If there are any deadlocked processes terminate them until it is gone.
+        if ((clockPointer->nanoSeconds % oneSec) == 0) {
+            char mess[256];
+            sprintf(mess, "OSS: Running Deadlock Detection at time %d:%d\n", clockPointer->seconds, clockPointer->nanoSeconds);
+            printf("%s", mess);
+            logMessage(logFile, mess);
+            deadlockDetectionCount++;
+
+            // return deadlock detect info
+            struct DeadlockInfo deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
+
+            if(!deadlockInfo.isDeadlock) {
+                printf("\tNo Deadlocks Detected\n");
+                logMessage(logFile, "\tNo Deadlocks Detected\n");
+            }
+            while(deadlockInfo.isDeadlock) {
+                printf("\tEntry ");
+                logMessage(logFile,  "\tEntry ");
+            }
+        }
+    }
 }
