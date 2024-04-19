@@ -45,20 +45,20 @@ struct rTable {
 
 // help function -------------------------------------------------------------------------------
 void help(){
-    printf("Usage: ./oss [-h] [-n proc] [-s simul] [-t timeToLaunchNewChild] [-f logfile]\n");
+    printf("Usage: ./oss [-h] [-n proc] [-s simul] [-i intervalToLaunchNewChild] [-f logfile]\n");
     printf("\t-h: Help Information\n");
     printf("\t-n proc: Number of total children to launch\n");
     printf("\t-s simul: How many children to allow to run simultaneously\n");
-    printf("\t-t timeToLaunchNewChild: The given time to Launch new child every so many nanoseconds\n");
+    printf("\t-i intervalToLaunchNewChild: The given time to Launch new child every so many Microseconds\n");
     printf("\t-f logfile: The name of Logfile you want to write to\n");
 }
 
 
-// increment clock function --------------------------------------------------------------------
+// Increment the Clock
 void incrementClock(struct Clock* clockPointer, int incrementTime) {
     clockPointer->nanoSeconds += incrementTime;
 
-    // Check if nanoseconds have reached 1 second
+    // If Nanoseconds reached 1 second, overrule
     if (clockPointer->nanoSeconds >= oneSecond) {
         clockPointer->seconds++;
         clockPointer->nanoSeconds -= oneSecond;
@@ -66,7 +66,7 @@ void incrementClock(struct Clock* clockPointer, int incrementTime) {
 }
 
 
-// function for displaying the process table---------------------------------------------------
+// Display process table function
 void procTableDisplay(const char* logFile, struct Clock* clockPointer, struct PCB* procTable, int proc){
     char mess1[256], mess2[256], mess3[256], mess4[256], mess5[256];
 
@@ -116,21 +116,21 @@ void procTableDisplay(const char* logFile, struct Clock* clockPointer, struct PC
 }
 
 
-// function for signal handle to change timeout---------------------------------------------
+// Signal Timeout
 void alarmSignalHandler(int signum) {
-    printf("\n\n\n\nALERT -> OSS: Been 5 seconds: No more Generating NEW Processes!\n\n\n\n");
+    printf("\nOSS: Been 5 seconds: No more Generating NEW Processes!\n");
     alarmTimeout = true;
 }
 
 
-// function for ctrl-c signal handler--------------------------------------------------------
+// Signal Handle for Ctrl-C
 void controlHandler(int signum) {
-    printf("\n\n\n\nOSS: You hit Ctrl-C. Time to Terminate\n\n\n\n");
+    printf("\nOSS: You hit Ctrl-C. Time to Terminate\n");
     ctrlTimeout = true;
 }
 
 
-// fucntion to handle logging when message is recieved and message is sent----------------------
+// Log Messages Function
 void logMessage(const char* logFile, const char* message) {
 
     if (lineCount < 10000) {
@@ -290,8 +290,8 @@ int main(int argc, char** argv) {
             case 's':
                 simul = atoi(optarg);
                 break;
-            case 't':
-                timeLimit = atoi(optarg);
+            case 'i':
+                timeLimit = atoi(optarg) * 1000000;
                 break;
             case 'f':
                 logFile = optarg;
