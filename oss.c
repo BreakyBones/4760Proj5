@@ -413,20 +413,20 @@ int main(int argc, char** argv) {
 
 
 
-    // main loop: stay in loop until timeout hits from signal or childInSystem = False or the number of workers is greater than or equal to the maximum number of process
+    // MAIN LOOP
     while ((workers < proc || childrenInSystem == true) && !ctrlTimeout) {
-        // do a nonblocking waitpid to see if child process has terminated-------------------------------------------------------------------------------------
+        // Non Blocking WaitPID to check for terminations
         int status;
         int terminatingPid = waitpid(-1, &status, WNOHANG);
 
-        // Free resources
+        // Free resources if a process terminated
         if (terminatingPid > 0) {
             for (int i = 0; i < proc; i++) {
                 if (processTable[i].pid == terminatingPid) {
                     processTable[i].occupied = 0;
                     processTable[i].resourceNeeded = -1;
 
-                    // free up resources and keep track for print
+
                     int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
                     for (int j = 0; j < MAX_RS; j++) {
                         resourceTable[j].available += processTable[i].allocationTable[j];
@@ -458,21 +458,21 @@ int main(int argc, char** argv) {
             activeWorkers--;
         }
 
-        // see if all children have terminated
+        // Check if all Children have been terminated
         if(termWorker == proc) {
             childrenInSystem = false;
         }
 
-        // increment clock by 1/10 ms every iteration of loop
+        // Increment Clock by 250ms
         incrementClock(clockPointer, C_INCREMENT);
 
-        // display process table every half second------------------------------------------------------------------------------------------------------------
+        // Every Half Second Display the Process Table
         if ((clockPointer->nanoSeconds % (int)(oneSecond / 2)) == 0) {
             procTableDisplay(logFile, clockPointer, processTable, proc);
             logAvailableResource(logFile, resourceTable);
         }
 
-        // every 20 requests, output a table showing the current resources allocated to each process
+        // Every 20 Resource Requests display the resource table
         int copyCount = immRequest + blockRequest;
         int newCount = 0;
 
@@ -492,9 +492,9 @@ int main(int argc, char** argv) {
             logMessage(logFile, mess);
             deadlockDetectionCount++;
 
-            // run deadlock detection return information
+            // Run the Deadlock Info
             struct DeadlockInfo deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
-            // Check if a deadlock was detected
+            // Check if any deadlocks were detected
             if (!deadlockInfo.isDeadlock) {
                 printf("\tNo deadlocks detected\n");
                 logMessage(logFile, "\tNo deadlocks detected\n");
@@ -503,7 +503,7 @@ int main(int argc, char** argv) {
                 printf("\tEntry ");
                 logMessage(logFile,  "\tEntry ");
 
-                // Loop through the deadlockedProcesses array to print the IDs of deadlocked processes
+                // Loop through the deadlockedProcesses array to print the deadlocked IDs
                 for (int i = 0; i < deadlockInfo.count; i++) {
                     int deadlockedProcessId = deadlockInfo.deadlockedProcesses[i];
                     char m2[256];
@@ -516,7 +516,7 @@ int main(int argc, char** argv) {
 
                 deadlockProcesses += deadlockInfo.count;
 
-                // Handle the deadlock (terminate a process) - LOWEST ENTRY NUMBER will be TERMINATED
+                // Terminate Deadlock Process until no longer deadlocked - LOWEST ENTRY NUMBER will be TERMINATED
                 char m3[256];
                 sprintf(m3, "\tOSS: Terminating Entry %d to remove deadlock\n", deadlockInfo.deadlockedProcesses[0]);
                 printf("%s", m3);
@@ -526,11 +526,11 @@ int main(int argc, char** argv) {
                 kill(processTable[deadlockInfo.deadlockedProcesses[0]].pid, SIGKILL);
                 deadlockTerm++;
 
-                // Update pcb and resource table
+                // Update Process Table
                 processTable[deadlockInfo.deadlockedProcesses[0]].occupied = 0;
                 processTable[deadlockInfo.deadlockedProcesses[0]].resourceNeeded = -1;
 
-                // free up resources and keep track for print
+                // Free Resources
                 int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
                 for (int j = 0; j < MAX_RS; j++) {
                     resourceTable[j].available += processTable[deadlockInfo.deadlockedProcesses[0]].allocationTable[j];
@@ -538,7 +538,7 @@ int main(int argc, char** argv) {
                     processTable[deadlockInfo.deadlockedProcesses[0]].allocationTable[j] = 0;
                 }
 
-                //print
+                // Log
                 char m1[256], m2[256];
                 sprintf(m1, "--> OSS: Worker %d TERMINATED\n", processTable[deadlockInfo.deadlockedProcesses[0]].pid);
                 printf("%s", m1);
@@ -556,7 +556,7 @@ int main(int argc, char** argv) {
                 printf("\n");
                 logMessage(logFile, "\n");
 
-                // run function again to see if isDeadlock changed
+                // Run again to check if Deadlocked still
                 deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
 
             }
@@ -566,9 +566,9 @@ int main(int argc, char** argv) {
 
 
 
-        // Determine if we should launch a child
+        // Launch Child?
         if (activeWorkers < simul && workers < proc && !alarmTimeout) {
-            //check if -t nanoseconds have passed
+            //check if the interval has passed
             if (clockPointer->nanoSeconds >= (int)(copyNano + timeLimit)) {
                 copyNano += timeLimit;
 
@@ -577,19 +577,19 @@ int main(int argc, char** argv) {
                     copyNano = 0;
                 }
 
-                //fork a worker
+                // FORK
                 pid_t childPid = fork();
 
                 if (childPid == 0) {
-                    // Char array to hold information for exec call
+
                     char* args[] = {"./worker", 0};
 
-                    // Execute the worker file with given arguments
+                    // Execute worker with arguments
                     execvp(args[0], args);
                 } else {
                     activeWorkers++;
                     childrenInSystem = true;
-                    // New child was launched, update process table
+                    // UPDATE PROCESS TABLE
                     for(int i = 0; i < proc; i++) {
                         if (processTable[i].pid == 0) {
                             processTable[i].occupied = 1;
@@ -602,26 +602,26 @@ int main(int argc, char** argv) {
 
                     char message3[256];
                     sprintf(message3, "-> OSS: Generating Process with PID %d and putting it in ready queue at time %d:%d\n", processTable[workers].pid, clockPointer->seconds, clockPointer->nanoSeconds);
-                    //printf("%s\n", message3);
+
                     logMessage(logFile, message3);
                     workers++;
                 }
-            } //end of if-else statement for -t parameter
-        } //end of simul if statement
+            }
+        }
 
 
-        // check to see if we can grant any outstanding requests for recources by processes that didn't get them in the past-----------------------------------
+        // Check if resource requests can be fulfilled
         for (int i = 0; i < proc; i++) {
             if (processTable[i].resourceNeeded != -1) {
                 if(resourceTable[processTable[i].resourceNeeded].available > 0) {
-                    // grant access to resource
+                    // Granted
                     resourceTable[buf.resourceNum].available--;
                     processTable[i].allocationTable[buf.resourceNum]++;
 
-                    // change resource needed back to one showing its not blocked anymore
+                    // Process no longer needs resources; reset them
                     processTable[i].resourceNeeded = -1;
 
-                    //msgsnd: process got granted this resource send message to worker
+                    // Send message back saying process' request was granted
                     buf.mtype = processTable[i].pid;
                     if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
                         perror("OSS: msgsnd to worker failed");
@@ -637,8 +637,8 @@ int main(int argc, char** argv) {
         }
 
 
-        // check if we have recieved a message from a worker---------------------------------------------------------------------------------------------------
-        // if message from child see if its a request or a release
+        // Check if message is received and if it is a request or release
+
         if ( msgrcv(msqid, &buf, sizeof(msgbuffer), 0, IPC_NOWAIT) == -1) {
             if (errno == ENOMSG) {
                 continue;
@@ -687,13 +687,14 @@ int main(int argc, char** argv) {
                 char m3[256];
                 sprintf(m3, "OSS: Acknowledged Process %d releasing r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
                 logMessage(logFile, m3);
-                //release
+
+                // Free Resources
                 for (int i = 0; i < proc; i++) {
                     if (buf.cPid == processTable[i].pid) {
                         resourceTable[buf.resourceNum].available++;
                         processTable[i].allocationTable[buf.resourceNum]--;
 
-                        // msgsnd: process got released so can send message back to worker
+                        // Process Released
                         buf.mtype = buf.cPid;
                         if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
                             perror("OSS: msgsnd to worker failed");
@@ -708,9 +709,9 @@ int main(int argc, char** argv) {
                 }
             }
         }
-    } // end of main loop
+    }
 
-    // print final PCB and available resouces
+    // Print Final Process Table and Final Stats
     char mess9[256];
     sprintf(mess9, "\nFinal PCB Table:\n");
     printf("%s", mess9);
@@ -718,25 +719,25 @@ int main(int argc, char** argv) {
     procTableDisplay(logFile, clockPointer, processTable, proc);
     logAvailableResource(logFile, resourceTable);
 
-    // print and calulate stats
+    // Final Stats
     char mess[256];
 
-    // total immediate requests
+    // Total Requests
     sprintf(mess, "\nSTATS:\n----------------------------------------------\nTotal number of immediate request: %d\n", immRequest);
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // total rejected request (has to wait)
+    // Total Rejected Request
     sprintf(mess, "Total number of blocked request: %d\n", blockRequest);
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // total number of process terminated by deadlock detection algorithm
+    // Total number of processes terminated in deadlock
     sprintf(mess, "Total number of process terminated by deadlock detection algorithm: %d\n", deadlockTerm);
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // total number of successful terminations
+    // Total successful terminations
     int newProc = 0;
     for (int i = 0; i < proc; i++) {
         if (processTable[i].pid != 0) {
@@ -748,17 +749,17 @@ int main(int argc, char** argv) {
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // total times deadlock detection algorithm was ran
+    // Total runs of the algorithm
     sprintf(mess, "Total number of times deadlock detection algorithm was ran: %d\n", deadlockDetectionCount);
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // total number of process stuck in deadlock
+    // Total stuck processes in deadlock
     sprintf(mess, "Total number of processes stuck in deadlock throughout execution: %d\n", deadlockProcesses);
     printf("%s", mess);
     logMessage(logFile, mess);
 
-    // percentage of processes in a deadlock that had to be terminated on an average
+    // Percentage of processes in a deadlock that had to be terminated on an average
     // Ensure that deadlockProcesses is not zero to avoid division by zero
     if (deadlockProcesses > 0) {
         float percentage = ((float)deadlockTerm / deadlockProcesses) * 100;
@@ -771,7 +772,7 @@ int main(int argc, char** argv) {
     logMessage(logFile, mess);
 
 
-    // do clean up
+    // Clean up and Detach from SHM
     for(int i=0; i < proc; i++) {
         if(processTable[i].occupied == 1) {
             kill(processTable[i].pid, SIGKILL);
@@ -779,14 +780,14 @@ int main(int argc, char** argv) {
     }
 
 
-    // get rid of message queue
+
     if (msgctl(msqid, IPC_RMID, NULL) == -1) {
         perror("oss.c: msgctl to get rid of queue, failed\n");
         exit(1);
     }
 
 
-    //detach from shared memory
+
     shmdt(clockPointer);
 
     if (shmctl(shmid, IPC_RMID, NULL) == -1) {
@@ -798,7 +799,7 @@ int main(int argc, char** argv) {
 
     printf("\n\nOSS: End of Parent (System is clean)\n");
 
-    //return that oss ended successfully
+    // END OF PROGRAM
     return EXIT_SUCCESS;
 
 }
