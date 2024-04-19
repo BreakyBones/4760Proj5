@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
     struct Clock *clockPointer;
 
     // getopt commands
-    while((opt = getopt(argc, argv, "hn:s:t:f:")) != 1) {
+    while((opt = getopt(argc, argv, "hn:s:i:f:")) != 1) {
         switch(opt) {
             case 'h':
                 print_usage();
