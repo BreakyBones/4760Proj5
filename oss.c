@@ -452,7 +452,277 @@ int main(int argc, char** argv) {
             while(deadlockInfo.isDeadlock) {
                 printf("\tEntry ");
                 logMessage(logFile,  "\tEntry ");
+
+                for (int i = 0; i < deadlockInfo.count; i++) {
+                    int deadlockedProcessID = deadlockInfo.deadlockedProc[i];
+                    char mess2[256];
+                    sprintf(mess2, "%d; ", deadlockedProcessID);
+                    printf("%s", mess2);
+                    logMessage(logFile , mess2);
+                }
+                printf("Deadlocked\n");
+                logMessage(logFile, "Deadlocked\n");
+
+                deadlockProcesses += deadlockInfo.count;
+
+                // Terminate processes of Lowest Entry Number
+                char mess3[256];
+                sprintf(mess3, "\tOSS: Terminating Entry %d to remove deadlock\n", deadlockInfo.deadlockedProcesses[0]);
+                printf("%s", mess3);
+                logMessage(logFile, mess3);
+
+                kill(processTable[deadlockInfo.deadlockedProc[0]].pid, SIGKILL);
+                deadlockTerm++;
+
+                // update PCB
+                processTable[deadlockInfo.deadlockedProc[0]].occupied = 0;
+                processTable[deadlockInfo.deadlockedProc[0]].resourceNeeded = -1;
+
+                // free resources
+                int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+                for (int j = 0; j < MAX_RS; j++) {
+                    resourceTable[j].available += processTable[deadlockInfo.deadlockedProc[0]].allocationTable[j];
+                    terminatedR[j] = processTable[deadlockInfo.deadlockedProc[0]].allocationTable[j];
+                    processTable[deadlockInfo.deadlockedProc[0]].allocationTable[j] = 0;
+                }
+
+                char mess1[265], mess2[256];
+                sprintf(mess1, "-> OSS: Worker %d TERMINATED\n", processTable[deadlockInfo.deadlockedProc[0]].pid);
+                printf("%s", mess1);
+                logMessage(logFile, mess1);
+
+                printf("\tResources Released: ");
+                for (int j = 0; j < MAX_RS; j++) {
+                    if (terminatedR[j] != 0) {
+                        sprintf(mess2, "r%d:%d; ", j, terminatedR[j]);
+                        printf("%s", mess2);
+                        logMessage(logFile, mess2);
+                    }
+                }
+                printf("\n");
+                logMessage(logFile, "\n");
+
+                // run again to check if Deadlock is changed
+                deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
+            }
+        }
+
+        // Check if child should be launched
+        if (activeWorkers < simul && workers < proc && !alarmTO) {
+            if (clockPointer->nanoSeconds >= (int)(copyNano + timeToLaunch)) {
+                copyNano += timeToLaunch;
+
+                if (copyNano >= oneSec) {
+                    copyNano = 0;
+                }
+
+                // FORK
+                pid_t childPid = fork();
+
+                if (childPid == 0) {
+                    char* args[] = {"./worker" , 0};
+                    execvp(args[0], args);
+                } else {
+                    activeWorkers++;
+                    childrenInSystem = true;
+
+                    // Update Process Table for new Child
+                    for (int i = 0; i < proc; i++) {
+                        if (processTable[i].pid == 0) {
+                            processTable[i].occupied = 1;
+                            processTable[i].pid = childPid;
+                            processTable[i].startSeconds = clockPointer->seconds;
+                            processTable[i].startNano = clockPointer->nanoSeconds;
+                            break;
+                        }
+                    }
+
+                    char mess3[256];
+                    sprintf(mess3, "-> OSS: Generating Process with PID %d and putting it in ready queue at time %d:%d\n", processTable[workers].pid, clockPointer->seconds, clockPointer->nanoSeconds);
+                    logMessage(logFile, mess3);
+                    workers++;
+                }
+            }
+        }
+
+        // Checking for resource Requests
+        for (int i = 0; i < proc; i++) {
+            if (processTable[i].resourceNeeded != -1) {
+                if (resourceTable[processTable[i].resourceNeeded].available > 0) {
+                    resourceTable[buf.resourceAm].available--;
+                    processTable[i].allocationTable[buf.resourceAm]++;
+
+                    processTable[i].resourceNeeded = -1;
+
+                    buf.mtype = processTable[i].pid;
+                    if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+                        perror("OSS: MSGSND to worker failed");
+                        exit(1);
+                    } else {
+                        printf("OSS: Granting Process %d request r%d at time %d:%d\n", processTable[i].pid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                        char mess2[256];
+                        sprintf(mess2, "OSS: Granting Process %d request r%d at time %d:%d\n", processTable[i].pid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                        logMessage(logFile, mess2);
+                    }
+                }
+            }
+        }
+
+
+        // Check Message Buffers (with a nonblock message receive) to see if we received message from child
+        if ( msgrcv(msqid, &buf, sizeof(msgbuffer), 0, IPC_NOWAIT) == -1) {
+            if (errno == ENOMSG) {
+                continue;
+            } else {
+                perror("OSS: Failed to recieve message\n");
+                exit(1);
+            }
+        } else {
+            if (buf.reqOrRel == 0) {
+                printf("OSS: Detected Process %d requesting r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                char mess[256];
+                sprintf(mess, "OSS: Detected Process %d requesting r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                logMessage(logFile, mess);
+                //request
+                for (int i = 0; i < proc; i++) {
+                    if (buf.cPid == processTable[i].pid) {
+                        if (resourceTable[buf.resourceAm].available > 0) {
+                            resourceTable[buf.resourceAm].available--;
+                            processTable[i].allocationTable[buf.resourceAm]++;
+                            immRequest++;
+
+                            //msgsnd: process got granted this resource send message to worker
+                            buf.mtype = buf.cPid;
+                            if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+                                perror("OSS: msgsnd to worker failed");
+                                exit(1);
+                            } else {
+                                printf("OSS: Granting Process %d request r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                                char m2[256];
+                                sprintf(m2, "OSS: Granting Process %d request r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                                logMessage(logFile, m2);
+                            }
+                        } else {
+                            processTable[i].resourceNeeded = buf.resourceAm;
+                            blockRequest++;
+
+                            char mess2[256];
+                            sprintf(mess2, "OSS: No instances of r%d available, Worker %d added to wait queue at time %d:%d\n", buf.resourceAm, buf.cPid, clockPointer->seconds, clockPointer->nanoSeconds);
+                            logMessage(logFile, mess2);
+                            printf("%s", mess2);
+                        }
+                    }
+                }
+            } else {
+                printf("OSS: Acknowledged Process %d releasing r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                char mess3[256];
+                sprintf(mess3, "OSS: Acknowledged Process %d releasing r%d at time %d:%d\n", buf.cPid, buf.resourceAm, clockPointer->seconds, clockPointer->nanoSeconds);
+                logMessage(logFile, mess3);
+                //release
+                for (int i = 0; i < proc; i++) {
+                    if (buf.cPid == processTable[i].pid) {
+                        resourceTable[buf.resourceAm].available++;
+                        processTable[i].allocationTable[buf.resourceAm]--;
+
+                        // msgsnd: process got released so can send message back to worker
+                        buf.mtype = buf.cPid;
+                        if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+                            perror("OSS: msgsnd to worker failed");
+                            exit(1);
+                        } else {
+                            printf("OSS: Resources Released : r%d:1\n", buf.resourceAm);
+                            char mess4[256];
+                            sprintf(mess4, "OSS: Resources Released : r%d:1\n", buf.resourceAm);
+                            logMessage(logFile, mess4);
+                        }
+                    }
+                }
             }
         }
     }
+
+    // Print Final Resources
+    char mess1[256];
+    sprintf(mess1, "\nFinal PCB Table:\n");
+    printf("%s", mess1);
+    logMessage(logFile, mess1);
+    procTableDisplay(logFile, clockPointer, processTable, proc);
+    logAvailReso(logFile, resourceTable);
+
+    // Print Stats
+    char mess2[256];
+    sprintf(mess2, "\nSTATS:\n----------------------------------------------\nTotal number of immediate request: %d\n", immRequest);
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Total Rejected Requests
+    sprintf(mess2, "Total number of blocked request: %d\n", blockRequest);
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Total Proc Terminated by Deadlock Detection
+    sprintf(mess2, "Total number of process terminated by deadlock detection algorithm: %d\n", deadlockTerm);
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Total of Successful Terminations
+    int newProc = 0;
+    for (int i = 0; i < proc; i++) {
+        if (processTable[i].pid != 0) {
+            newProc++;
+        }
+    }
+    sprintf(mess2, "Total number of process terminated successfully: %d\n", (newProc - deadlockTerm));
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Total runs of Deadlock Detection Algorithm
+    sprintf(mess2, "Total number of times deadlock detection algorithm was ran: %d\n", deadlockDetectionCount);
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Total number of Deadlocked Processes
+    sprintf(mess2, "Total number of processes stuck in deadlock throughout execution: %d\n", deadlockProcesses);
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+    // Percentage of processes in deadlock that had to be terminated on average
+    // Ensure that deadlockProcesses is not zero to avoid division by zero
+    if (deadlockProcesses > 0) {
+        float percentage = ((float)deadlockTerm / deadlockProcesses) * 100;
+        sprintf(mess2, "Percentage of processes in a deadlock that had to be terminated: %.2f%%\n", percentage);
+    } else {
+        sprintf(mess2, "No deadlock processes were detected.\n");
+    }
+
+    printf("%s", mess2);
+    logMessage(logFile, mess2);
+
+
+    // Clean up of SHM and Processes
+    for (int i = 0; i < proc; i++) {
+        if(processTable[i].occupied == 1) {
+            kill(processTable[i].pid, SIGKILL);
+        }
+    }
+
+    // Clear message queue
+    if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+        perror("OSS: MSGCTL to get rid of queue failed\n");
+        exit(1);
+    }
+
+    // Detach from SHM
+    shmdt(clockPointer);
+
+    if (shmctl(shmid, IPC_RMID, NULL) == -1) {
+        perror("OSS: SHMCTL to clear shared memory failed");
+        exit(1);
+    }
+
+    system("rm msgq.txt");
+
+    printf("\n\nOSS: End of Parent (System should be clean)\n");
+
+    return EXIT_SUCCESS;
 }
