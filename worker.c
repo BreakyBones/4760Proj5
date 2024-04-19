@@ -1,3 +1,5 @@
+// Kanaan Sullivan 4760 Proj 5
+
 #include <unistd.h>
 #include <sys/types.h>
 #include <stdio.h>
@@ -10,30 +12,10 @@
 #include <errno.h>
 #include <time.h>
 #include <stdbool.h>
+#include "oss.h"
 
-// global variables
-#define B 10000000
+// Globals
 #define TERM_NANO 25000000
-#define SHMKEY 561876513 // Shared Memory Key
-#define oneSec 1000000000 // Definition of one second in NanoSeconds
-#define MAX_RS 10 // Maximum Resources
-#define MAX_IN 20 // Maximum Instances of those Resources
-#define MAX_PROC 100 // Maximum number of Processes allowed
-
-// Clock
-struct Clock {
-    int seconds;
-    int nanoSeconds;
-};
-
-// Message Buffer
-typedef struct msgbuffer {
-    long mtype;
-    int reqOrRel;
-    int resourceAm;
-    pid_t cPid;
-} msgbuffer;
-
 
 int allocationTable[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
@@ -44,8 +26,8 @@ int main(int argc, char ** argv) {
     int msqid = 0; // messageQueueID
     key_t key;
     buf.mtype = 1;
-    buf.reqOrRel; //Request or Release given resouces (0 for request, 1 for release)
-    buf.resourceAm; //Resource 0-9 (10 resources)
+    buf.reqOrRel; //Request or Release given resources (0 for request, 1 for release)
+    buf.resourceNum; //Resource 0-9 (10 resources)
 
     // Seed the random number generator with the current time and the PID
     srand(time(NULL) ^ (getpid()<<16));
@@ -85,7 +67,7 @@ int main(int argc, char ** argv) {
     }
 
     // main loop: Variables
-    int oneSecs = clockPointer->seconds + 1;
+    int oneSec = clockPointer->seconds + 1;
     //bool request = false;
     bool msgReady = false;
     int available = 200;
@@ -117,7 +99,7 @@ int main(int argc, char ** argv) {
                 }
 
                 buf.reqOrRel = 0;
-                buf.resourceAm = reqNum;
+                buf.resourceNum = reqNum;
 
                 msgReady = true;
 
@@ -139,7 +121,7 @@ int main(int argc, char ** argv) {
                 }
 
                 buf.reqOrRel = 1;
-                buf.resourceAm = relNum;
+                buf.resourceNum = relNum;
 
                 msgReady = true;
 
@@ -179,7 +161,7 @@ int main(int argc, char ** argv) {
 
         // check if it is time to terminate
         // make sure it ran for a least a second
-        if (clockPointer->seconds > oneSecs) {
+        if (clockPointer->seconds > oneSec) {
             // every 250ms check to terminate
             if((clockPointer->nanoSeconds % TERM_NANO) == 0 ) {
                 //printf("-> WORKER %d: Checking if time to terminate\n", getpid());
