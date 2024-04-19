@@ -45,7 +45,7 @@ int main(int argc, char ** argv) {
     key_t key;
     buf.mtype = 1;
     buf.reqOrRel; //Request or Release given resouces (0 for request, 1 for release)
-    buf.resourceNum; //Resource 0-9 (10 resources)
+    buf.resourceAm; //Resource 0-9 (10 resources)
 
     // Seed the random number generator with the current time and the PID
     srand(time(NULL) ^ (getpid()<<16));
@@ -117,7 +117,7 @@ int main(int argc, char ** argv) {
                 }
 
                 buf.reqOrRel = 0;
-                buf.resourceNum = reqNum;
+                buf.resourceAm = reqNum;
 
                 msgReady = true;
 
@@ -139,7 +139,7 @@ int main(int argc, char ** argv) {
                 }
 
                 buf.reqOrRel = 1;
-                buf.resourceNum = relNum;
+                buf.resourceAm = relNum;
 
                 msgReady = true;
 
