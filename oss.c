@@ -467,7 +467,7 @@ int main(int argc, char** argv) {
 
                 // Terminate processes of Lowest Entry Number
                 char mess3[256];
-                sprintf(mess3, "\tOSS: Terminating Entry %d to remove deadlock\n", deadlockInfo.deadlockedProcesses[0]);
+                sprintf(mess3, "\tOSS: Terminating Entry %d to remove deadlock\n", deadlockInfo.deadlockedProc[0]);
                 printf("%s", mess3);
                 logMessage(logFile, mess3);
 
