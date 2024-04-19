@@ -85,7 +85,7 @@ int main(int argc, char ** argv) {
     }
 
     // main loop: Variables
-    int oneSec = clockPointer->seconds + 1;
+    int oneSecs = clockPointer->seconds + 1;
     //bool request = false;
     bool msgReady = false;
     int available = 200;
@@ -179,7 +179,7 @@ int main(int argc, char ** argv) {
 
         // check if it is time to terminate
         // make sure it ran for a least a second
-        if (clockPointer->seconds > oneSec) {
+        if (clockPointer->seconds > oneSecs) {
             // every 250ms check to terminate
             if((clockPointer->nanoSeconds % TERM_NANO) == 0 ) {
                 //printf("-> WORKER %d: Checking if time to terminate\n", getpid());
