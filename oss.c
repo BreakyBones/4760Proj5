@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
 
 
     // get opt to get command line arguments
-    while((option = getopt(argc, argv, "hn:s:t:f:")) != -1) {
+    while((option = getopt(argc, argv, "hn:s:i:f:")) != -1) {
         switch(option) {
             case 'h':
                 help();
