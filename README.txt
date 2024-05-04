@@ -1,10 +1,10 @@
 Kanaan Sullivan
-Project 5 - Resource Management
+Project 6 - Memory Management
 
-Problems: Currently no problems, had a single bug once where Deadlock Detection ran forever, could not replicate.
+Problems: Currently no problems
 
-Simulated OS to generate new processes and send resource requests. If a Deadlock is detected it will kill the lowest entry in our process table
-This process would have been in the system longest and stuck the longest.
+Simulated OS to generate new processes and send save them in a "Virtual Memory". Occasionally as programs are launched and messages traded a page fault may occur.
+As proceses fill the page and frame tables a wait queue in FIFO style is implemented to prevent page faulting.
 
 To compile the program simply run the "make" command
 
