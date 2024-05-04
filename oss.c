@@ -73,46 +73,43 @@ void incrementClock(struct Clock* clockPointer, int incrementTime) {
 void procTableDisplay(const char* logFile, struct Clock* clockPointer, struct PCB* procTable, int proc){
     char mess1[256], mess2[256], mess3[256], mess4[256], mess5[256];
 
-    if (lineCount < 10000) {
-        FILE* filePointer = fopen(logFile, "a");
+    FILE* filePointer = fopen(logFile, "a");
 
-        if (filePointer != NULL) {
-            //create messages
-            sprintf(mess1, "OSS PID: %d  SysClockS: %d  SysClockNano: %d\n", getpid(), clockPointer->seconds, clockPointer->nanoSeconds);
-            sprintf(mess2, "Process Table: \n");
-            sprintf(mess3, "%-10s%-10s%-10s%-15s%-15s%-20s%-25s\n", "Entry", "Occupied", "PID", "StartS", "StartN", "ResourceRequested", "AllocationTable:[r0 r1 r2 r3 r4 r5 r6 r7 r8 r9]");
+    if (filePointer != NULL) {
+        //create messages
+        sprintf(mess1, "OSS PID: %d  SysClockS: %d  SysClockNano: %d\n", getpid(), clockPointer->seconds, clockPointer->nanoSeconds);
+        sprintf(mess2, "Process Table: \n");
+        sprintf(mess3, "%-10s%-10s%-10s%-15s%-15s%-20s%-25s\n", "Entry", "Occupied", "PID", "StartS", "StartN", "AddressNeeded", "PageTable");
 
-            //send message to log
-            fprintf(filePointer, "%s", mess1);
-            printf("%s", mess1);
-            fprintf(filePointer, "%s", mess2);
-            printf("%s", mess2);
-            fprintf(filePointer, "%s", mess3);
-            printf("%s", mess3);
-
-
-            for(int i = 0; i < proc; i++){
-                //create messages
-                sprintf(mess1, "OSS PID: %d  SysClockS: %d  SysClockNano: %d\n", getpid(), clockPointer->seconds, clockPointer->nanoSeconds);
-                sprintf(mess2, "Process Table: \n");
-                sprintf(mess3, "%-10s%-10s%-10s%-15s%-15s%-20s%-25s\n", "Entry", "Occupied", "PID", "StartS", "StartN", "AddressNeeded", "PageTable");
+        //send message to log
+        fprintf(filePointer, "%s", mess1);
+        printf("%s", mess1);
+        fprintf(filePointer, "%s", mess2);
+        printf("%s", mess2);
+        fprintf(filePointer, "%s", mess3);
+        printf("%s", mess3);
 
 
-                for(int j = 0; j < MAX_PAGES; j++) {
-                    sprintf(mess5, "%d ", procTable[i].pageTable[j]);
-                    fprintf(filePointer, "%s", mess5);
-                    printf("%s", mess5);
-                }
+        for(int i = 0; i < proc; i++){
+            sprintf(mess4, "%-10d%-10d%-10d%-15d%-15d%-20d[ ", i, procTable[i].occupied, procTable[i].pid, procTable[i].startSeconds, procTable[i].startNano, procTable[i].memAddyNeeded);
+            fprintf(filePointer, "%s", mess4);
+            printf("%s", mess4);
 
-                fprintf(filePointer, "]\n");
-                printf("]\n");
+
+            for(int j = 0; j < MAX_PAGES; j++) {
+                sprintf(mess5, "%d ", procTable[i].pageTable[j]);
+                fprintf(filePointer, "%s", mess5);
+                printf("%s", mess5);
             }
 
-            fclose(filePointer);
-        } else {
-            perror("OSS: Error opening logFile\n");
-            exit(1);
+            fprintf(filePointer, "]\n");
+            printf("]\n");
         }
+
+        fclose(filePointer);
+    } else {
+        perror("OSS: Error opening logFile\n");
+        exit(1);
     }
 
 }
