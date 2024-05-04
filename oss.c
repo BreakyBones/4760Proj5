@@ -1,4 +1,4 @@
-// Kanaan Sullivan 4760 Proj 5
+// Kanaan Sullivan 4760 Proj 6
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -14,14 +14,15 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <signal.h>
 #include "oss.h"
 
 
 // global variables
 #define C_INCREMENT 2500000
-bool alarmTimeout = false;
-bool ctrlTimeout = false;
-int lineCount = 0;
+#define W_INCREMENT 0
+#define MAX_QS 1500 // max queue size
+bool timeout = false;
 
 
 // PCB struct------------------------------------------------------------------------------------
@@ -32,14 +33,16 @@ struct PCB {
     int startNano;          // time when it was forked
 
     //new elements
-    int allocationTable[MAX_RS]; // array for each worker to count each instance of each resource
-    int resourceNeeded; // the resource the worker is requesting
+    int pageTable[MAX_PAGES]; // array for each worker to count each instance of each resource
+    int memAddyNeeded; // memory address that element is getting blocked for (not-blocked if -1)
 };
 
 
-// resource table struct------------------------------------------------------------------------
-struct rTable {
-    int available; // total number of free instances of each resource
+// Frame Table
+struct FrameTable {
+    pid_t pid; // hold what worker has access to each frame
+    int pageNumber; // page number of worker that is in this frame
+    int dirtyBit; // 0 if not set, 1 if set
 };
 
 
@@ -89,13 +92,14 @@ void procTableDisplay(const char* logFile, struct Clock* clockPointer, struct PC
 
 
             for(int i = 0; i < proc; i++){
-                sprintf(mess4, "%-10d%-10d%-10d%-15d%-15d%-20d[ ", i, procTable[i].occupied, procTable[i].pid, procTable[i].startSeconds, procTable[i].startNano, procTable[i].resourceNeeded);
-                fprintf(filePointer, "%s", mess4);
-                printf("%s", mess4);
+                //create messages
+                sprintf(mess1, "OSS PID: %d  SysClockS: %d  SysClockNano: %d\n", getpid(), clockPointer->seconds, clockPointer->nanoSeconds);
+                sprintf(mess2, "Process Table: \n");
+                sprintf(mess3, "%-10s%-10s%-10s%-15s%-15s%-20s%-25s\n", "Entry", "Occupied", "PID", "StartS", "StartN", "AddressNeeded", "PageTable");
 
 
-                for(int j = 0; j < MAX_RS; j++) {
-                    sprintf(mess5, "%d ", procTable[i].allocationTable[j]);
+                for(int j = 0; j < MAX_PAGES; j++) {
+                    sprintf(mess5, "%d ", procTable[i].pageTable[j]);
                     fprintf(filePointer, "%s", mess5);
                     printf("%s", mess5);
                 }
@@ -110,155 +114,70 @@ void procTableDisplay(const char* logFile, struct Clock* clockPointer, struct PC
             exit(1);
         }
     }
-    lineCount += 3;
-    lineCount += proc;
 
 }
 
 
 // Signal Timeout
 void alarmSignalHandler(int signum) {
-    printf("\nOSS: Been 5 seconds: No more Generating NEW Processes!\n");
-    alarmTimeout = true;
+    printf("\nOSS: 5 Seconds have passed: No more Generating NEW Processes!\n");
+    timeout = true;
 }
 
 
 // Signal Handle for Ctrl-C
 void controlHandler(int signum) {
     printf("\nOSS: You hit Ctrl-C. Time to Terminate\n");
-    ctrlTimeout = true;
+    timeout = true;
 }
 
 
 // Log Messages Function
 void logMessage(const char* logFile, const char* message) {
 
-    if (lineCount < 10000) {
-        FILE* filePointer = fopen(logFile, "a"); //open logFile in append mode
-        if (filePointer != NULL) {
-            fprintf(filePointer, "%s", message);
-            fclose(filePointer);
-        } else {
-            perror("OSS: Error opening logFile\n");
-            exit(1);
-        }
+    FILE *filePointer = fopen(logFile, "a"); //open logFile in append mode
+    if (filePointer != NULL) {
+        fprintf(filePointer, "%s", message);
+        fclose(filePointer);
+    } else {
+        perror("OSS: Error opening logFile\n");
+        exit(1);
     }
-    lineCount++;
 }
 
-// function to log and print the available resources--------------------------------------------
-void logAvailableResource(const char* logFile, struct rTable* resourceTable) {
+
+// Log the Frame Table
+void logFrameTable(const char* logFile, struct FrameTable* frameTable) {
     char mess1[256], mess2[256];
 
-    if (lineCount < 10000) {
-        FILE* filePointer = fopen(logFile, "a"); //open logFile in append mode
-        if (filePointer != NULL) {
-            sprintf(mess1, "%-20s%-20s\n%-20s[ ", "Available Resources", "[ r0 r1 r2 r3 r4 r5 r6 r7 r8 r9 ]", "");
-            fprintf(filePointer, "%s", mess1);
-            printf("%s", mess1);
+    FILE* filePointer = fopen(logFile, "a"); //open logFile in append mode
+    if (filePointer != NULL) {
+        sprintf(mess1, "Frame Table:\n%-10s%-10s%-10s%-10s\n", "Frame #", "PID", "Page #", "Dirty Bit");
+        fprintf(filePointer, "%s", mess1);
+        printf("%s", mess1);
 
-            for(int i = 0; i < MAX_RS; i++) {
-                sprintf(mess2, "%d ", resourceTable[i].available);
-                fprintf(filePointer, "%s", mess2);
-                printf("%s", mess2);
-            }
-
-            fprintf(filePointer, "]\n");
-            printf("]\n");
-
-            fclose(filePointer);
-        } else {
-            perror("OSS: Error opening logFile\n");
-            exit(1);
+        for(int i = 0; i < MAX_FRAMES; i++) {
+            sprintf(mess2, "%-10d%-10d%-10d%-10d\n", i, frameTable[i].pid, frameTable[i].pageNumber, frameTable[i].dirtyBit);
+            fprintf(filePointer, "%s", mess2);
+            printf("%s", mess2);
         }
+
+        fprintf(filePointer, "\n");
+        printf("\n");
+
+        fclose(filePointer);
+    } else {
+        perror("OSS: Error opening logFile\n");
+        exit(1);
     }
-    lineCount += 2;
 }
 
-// Deadlock Detection Functions and structures--------------------------------------------------------------------------
-struct DeadlockInfo {
-    bool isDeadlock;
-    int deadlockedProcesses[MAX_PROC]; // Array to store IDs of deadlocked processes
-    int count; // Number of deadlocked processes
-};
+// Get Page Number Function
+int getPageNum(int address) {
+    int pageNum = 0;
 
-
-bool req_lt_avail(const int *req, const int *avail, const int pnum, const int num_res) {
-
-    int i = 0;
-
-    // Iterate through each resource type
-    for (; i < num_res; i++)
-        // Check if the process's request exceeds available resources
-        if (req[i] > avail[i])
-            break;
-
-    return (i == num_res); // Return true if all requests are less than or equal to available resources
-}
-
-
-struct DeadlockInfo deadlock(struct rTable* resourceTable, const int mess, const int n, struct PCB* procTable) {
-    struct DeadlockInfo deadlockInfo;
-    deadlockInfo.isDeadlock = false;
-    deadlockInfo.count = 0;
-
-    int work[mess]; // Array to store the working copy of available resources
-    bool finish[n]; // Array to track if each process has acquired all requested resources
-    int allocated[n][mess];
-    int request[n][mess];
-
-    // Initialize work array with available resources
-    for (int i = 0; i < mess; i++) {
-        work[i] = resourceTable[i].available;
-    }
-
-    // Initialize finish array, setting all processes as not finished
-    for (int i = 0; i < n; i++) {
-        finish[i] = false;
-    }
-
-    // Initialize request and allocated arrays
-    for (int i = 0; i < n; i++) {
-        for (int j = 0; j < mess; j++) {
-            // Fill in the request array based on resourceNeeded
-            if (procTable[i].resourceNeeded == j) {
-                request[i][j] = 1; // Assuming a request of 1 instance
-            } else {
-                request[i][j] = 0;
-            }
-
-            // Fill in the allocated array from the process's allocationTable
-            allocated[i][j] = procTable[i].allocationTable[j];
-        }
-    }
-
-    int p = 0;
-    // Iterate through all processes to check resource allocation
-    for (p = 0; p < n; p++) {
-        if (finish[p]) continue; // Skip already finished processes
-
-        // Check if the current process can get all its requested resources
-        if (req_lt_avail(request[p], work, p, mess)) {
-            finish[p] = true; // Mark process as finished
-
-            // Release resources allocated to this process back to work
-            for (int i = 0; i < mess; i++) {
-                work[i] += allocated[p][i];
-            }
-
-            p = -1; // Reset loop to check if this release allows other processes to finish
-        }
-    }
-
-    // Check if there are any processes that couldn't finish (indicating deadlock)
-    for (p = 0; p < n; p++) {
-        if (!finish[p]) {
-            deadlockInfo.isDeadlock = true;
-            deadlockInfo.deadlockedProcesses[deadlockInfo.count++] = p; // Storing the process ID or index
-        }
-    }
-
-    return deadlockInfo; // Return deadlock information
+    pageNum = address / 1024;
+    return pageNum;
 }
 
 
@@ -327,7 +246,7 @@ int main(int argc, char** argv) {
     struct PCB processTable[proc];
 
     // create array of structs for resource table size = 10 resources
-    struct rTable resourceTable[MAX_RS];
+    struct FrameTable frameTable[MAX_FRAMES];
 
     // Initalize the process table information for each process to 0
     for(int i = 0; i < proc; i++) {
@@ -335,15 +254,19 @@ int main(int argc, char** argv) {
         processTable[i].pid = 0;
         processTable[i].startSeconds = 0;
         processTable[i].startNano = 0;
-        for(int j = 0; j < MAX_RS; j++) {
-            processTable[i].allocationTable[j] = 0;
+        for(int j = 0; j < MAX_PAGES; j++) {
+            processTable[i].pageTable[j] = -1;
         }
-        processTable[i].resourceNeeded = -1;
+        processTable[i].memAddyNeeded = -1;
     }
 
-    // Initalize the resource table to have 20 instances of each resourse to start
-    for(int i = 0; i < MAX_RS; i++) {
-        resourceTable[i].available = MAX_IN;
+    // Initalize the frame table
+    // Initalize the frame table
+    for(int i = 0; i < MAX_FRAMES; i++) {
+        frameTable[i].pid = 0;
+        frameTable[i].pageNumber = -1;
+        frameTable[i].dirtyBit = 0;
+
     }
 
     // Allocate memory for the simulated clock
@@ -373,7 +296,7 @@ int main(int argc, char** argv) {
     printf("\ttimeToLaunchNewChild: %d\n", timeLimit);
     printf("\tlogFile: %s\n\n", logFile);
     procTableDisplay(logFile, clockPointer, processTable, proc);
-    logAvailableResource(logFile, resourceTable);
+    logFrameTable(logFile, frameTable);
     printf("---------------------------------------------------------------------------------------\n");
 
 
@@ -405,55 +328,68 @@ int main(int argc, char** argv) {
     int copyNano = clockPointer->nanoSeconds; // makes sure children can launch every timeToLaunchNewChild -t
 
     // stat variables
-    int immRequest = 0;
-    int blockRequest = 0;
-    int deadlockTerm = 0;
-    int deadlockDetectionCount = 0;
-    int deadlockProcesses = 0;
+    int frameCount = 0; // count number of frames
+    bool readRequest = true; // used to see read or write
+    int queueIndex = 0; // index of HeadOfFIFO
+    int nextIndex = 0; // make sure goes to end of queue
+    int FIFO_Queue[MAX_QS]; // FIFO queue
+    int numberOfMemAccesses = 0;
+    int numberOfPageFaults = 0;
 
-
+    //initialize FIFO Queue
+    for (int i=0; i < MAX_QS; i++) {
+        FIFO_Queue[i] = -1;
+    }
 
     // MAIN LOOP
-    while ((workers < proc || childrenInSystem == true) && !ctrlTimeout) {
+    while ((workers < proc || childrenInSystem == true) && !timeout) {
         // Non Blocking WaitPID to check for terminations
         int status;
         int terminatingPid = waitpid(-1, &status, WNOHANG);
 
-        // Free resources if a process terminated
+        // if so, we free up its resources and update termWorker & activeChildren variables
         if (terminatingPid > 0) {
             for (int i = 0; i < proc; i++) {
                 if (processTable[i].pid == terminatingPid) {
                     processTable[i].occupied = 0;
-                    processTable[i].resourceNeeded = -1;
+                    processTable[i].memAddyNeeded = -1;
 
+                    for (int j=0; j < MAX_PAGES; j++) {
+                        if (processTable[i].pageTable[j] != -1) {
+                            //int frameNum = processTable[i].pageTable[j];
+                            // update FIFO Queue
 
-                    int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-                    for (int j = 0; j < MAX_RS; j++) {
-                        resourceTable[j].available += processTable[i].allocationTable[j];
-                        terminatedR[j] = processTable[i].allocationTable[j];
-                        processTable[i].allocationTable[j] = 0;
+                            for (int k=0; k < MAX_QS; k++) {
+                                if (processTable[i].pageTable[j] == FIFO_Queue[k]) {
+                                    FIFO_Queue[k] = -1;
+                                    break;
+                                }
+                            }
+
+                            // free up frames and remove frames from page table
+                            frameTable[processTable[i].pageTable[j]].pageNumber = -1;
+                            frameTable[processTable[i].pageTable[j]].pid = 0;
+                            frameTable[processTable[i].pageTable[j]].dirtyBit = 0;
+                            frameCount--;
+                            processTable[i].pageTable[j] = -1;
+                        }
                     }
 
-                    // Print and Log
-                    char m1[256], m2[256];
+                    for (int k=0; k < MAX_FRAMES; k++) {
+                        if (processTable[i].pid == frameTable[k].pid) {
+                            frameTable[k].pageNumber = -1;
+                            frameTable[k].pid = 0;
+                            frameTable[k].dirtyBit = 0;
+                        }
+                    }
+
+                    //print
+                    char m1[256];
                     sprintf(m1, "--> OSS: Worker %d TERMINATED\n", processTable[i].pid);
                     printf("%s", m1);
                     logMessage(logFile, m1);
-
-                    printf("\tResources released: ");
-                    logMessage(logFile, "\tResources released: ");
-                    for (int j = 0; j < MAX_RS; j++) {
-                        if (terminatedR[j] != 0) {
-                            sprintf(m2, "r%d:%d; ", j, terminatedR[j]);
-                            printf("%s", m2);
-                            logMessage(logFile, m2);
-                        }
-                    }
-                    printf("\n");
-                    logMessage(logFile, "\n");
                 }
             }
-
             termWorker++;
             activeWorkers--;
         }
@@ -466,109 +402,20 @@ int main(int argc, char** argv) {
         // Increment Clock by 250ms
         incrementClock(clockPointer, C_INCREMENT);
 
-        // Every Half Second Display the Process Table
+        // display process table every half second------------------------------------------------------------------------------------------------------------
         if ((clockPointer->nanoSeconds % (int)(oneSecond / 2)) == 0) {
             procTableDisplay(logFile, clockPointer, processTable, proc);
-            logAvailableResource(logFile, resourceTable);
-        }
-
-        // Every 20 Resource Requests display the resource table
-        int copyCount = immRequest + blockRequest;
-        int newCount = 0;
-
-        if (copyCount != 0 && copyCount != newCount) {
-            if (((immRequest + blockRequest) % 20) == 0) {
-                procTableDisplay(logFile, clockPointer, processTable, proc);
-            }
-            newCount = immRequest + blockRequest;
-
-        }
-
-        // Every second run the deadlock algorithm. if Deadlocked, Terminate processes until Deadlock is ended
-        if ((clockPointer->nanoSeconds % oneSecond) == 0) {
-            char mess[256];
-            sprintf(mess, "OSS: Running Deadlock Detection at time %d:%d\n", clockPointer->seconds, clockPointer->nanoSeconds);
-            printf("%s", mess);
-            logMessage(logFile, mess);
-            deadlockDetectionCount++;
-
-            // Run the Deadlock Info
-            struct DeadlockInfo deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
-            // Check if any deadlocks were detected
-            if (!deadlockInfo.isDeadlock) {
-                printf("\tNo deadlocks detected\n");
-                logMessage(logFile, "\tNo deadlocks detected\n");
-            }
-            while (deadlockInfo.isDeadlock) {
-                printf("\tEntry ");
-                logMessage(logFile,  "\tEntry ");
-
-                // Loop through the deadlockedProcesses array to print the deadlocked IDs
-                for (int i = 0; i < deadlockInfo.count; i++) {
-                    int deadlockedProcessId = deadlockInfo.deadlockedProcesses[i];
-                    char m2[256];
-                    sprintf(m2, "%d; ", deadlockedProcessId);
-                    printf("%s", m2);
-                    logMessage(logFile, m2);
-                }
-                printf("deadlocked\n");
-                logMessage(logFile, "deadlocked\n");
-
-                deadlockProcesses += deadlockInfo.count;
-
-                // Terminate Deadlock Process until no longer deadlocked - LOWEST ENTRY NUMBER will be TERMINATED
-                char m3[256];
-                sprintf(m3, "\tOSS: Terminating Entry %d to remove deadlock\n", deadlockInfo.deadlockedProcesses[0]);
-                printf("%s", m3);
-                logMessage(logFile, m3);
-
-                // kill process
-                kill(processTable[deadlockInfo.deadlockedProcesses[0]].pid, SIGKILL);
-                deadlockTerm++;
-
-                // Update Process Table
-                processTable[deadlockInfo.deadlockedProcesses[0]].occupied = 0;
-                processTable[deadlockInfo.deadlockedProcesses[0]].resourceNeeded = -1;
-
-                // Free Resources
-                int terminatedR[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-                for (int j = 0; j < MAX_RS; j++) {
-                    resourceTable[j].available += processTable[deadlockInfo.deadlockedProcesses[0]].allocationTable[j];
-                    terminatedR[j] = processTable[deadlockInfo.deadlockedProcesses[0]].allocationTable[j];
-                    processTable[deadlockInfo.deadlockedProcesses[0]].allocationTable[j] = 0;
-                }
-
-                // Log
-                char m1[256], m2[256];
-                sprintf(m1, "--> OSS: Worker %d TERMINATED\n", processTable[deadlockInfo.deadlockedProcesses[0]].pid);
-                printf("%s", m1);
-                logMessage(logFile, m1);
-
-                printf("\tResources released: ");
-                logMessage(logFile, "\tResources released: ");
-                for (int j = 0; j < MAX_RS; j++) {
-                    if (terminatedR[j] != 0) {
-                        sprintf(m2, "r%d:%d; ", j, terminatedR[j]);
-                        printf("%s", m2);
-                        logMessage(logFile, m2);
-                    }
-                }
-                printf("\n");
-                logMessage(logFile, "\n");
-
-                // Run again to check if Deadlocked still
-                deadlockInfo = deadlock(resourceTable, MAX_RS, proc, processTable);
-
-            }
-
+            char m[256];
+            sprintf(m, "HeadOfFIFO = %d\n", FIFO_Queue[queueIndex]);
+            printf("%s", m);
+            logMessage(logFile, m);
+            logFrameTable(logFile, frameTable);
         }
 
 
-
-
-        // Launch Child?
-        if (activeWorkers < simul && workers < proc && !alarmTimeout) {
-            //check if the interval has passed
+        // Determine if we should launch a child
+        if (activeWorkers < simul && workers < proc) {
+            //check if -t nanoseconds have passed
             if (clockPointer->nanoSeconds >= (int)(copyNano + timeLimit)) {
                 copyNano += timeLimit;
 
@@ -577,19 +424,18 @@ int main(int argc, char** argv) {
                     copyNano = 0;
                 }
 
-                // FORK
+                //fork a worker
                 pid_t childPid = fork();
-
                 if (childPid == 0) {
-
+                    // Char array to hold information for exec call
                     char* args[] = {"./worker", 0};
 
-                    // Execute worker with arguments
+                    // Execute the worker file with given arguments
                     execvp(args[0], args);
                 } else {
                     activeWorkers++;
                     childrenInSystem = true;
-                    // UPDATE PROCESS TABLE
+                    // New child was launched, update process table
                     for(int i = 0; i < proc; i++) {
                         if (processTable[i].pid == 0) {
                             processTable[i].occupied = 1;
@@ -601,45 +447,145 @@ int main(int argc, char** argv) {
                     }
 
                     char message3[256];
-                    sprintf(message3, "-> OSS: Generating Process with PID %d and putting it in ready queue at time %d:%d\n", processTable[workers].pid, clockPointer->seconds, clockPointer->nanoSeconds);
-
+                    sprintf(message3, "-> OSS: Generating Process with PID %d at time %d:%d\n", processTable[workers].pid, clockPointer->seconds, clockPointer->nanoSeconds);
+                    //printf("%s\n", message3);
                     logMessage(logFile, message3);
                     workers++;
                 }
-            }
-        }
+            } //end of if-else statement for -i parameter
+        } //end of simul if statement
 
 
-        // Check if resource requests can be fulfilled
-        for (int i = 0; i < proc; i++) {
-            if (processTable[i].resourceNeeded != -1) {
-                if(resourceTable[processTable[i].resourceNeeded].available > 0) {
-                    // Granted
-                    resourceTable[buf.resourceNum].available--;
-                    processTable[i].allocationTable[buf.resourceNum]++;
+        // see if frame table is filled if not fill any memAddyNeeded from PCB
+        if (frameCount < MAX_FRAMES) {
+            // still room in frame table so find frame to fill any pages that are being requested
+            int i, j;
+            int address = 0;
+            int pageNum = 0;
 
-                    // Process no longer needs resources; reset them
-                    processTable[i].resourceNeeded = -1;
+            for (i=0; i < proc; i++) {
+                if (processTable[i].memAddyNeeded != -1) {
+                    // get address
+                    address = processTable[i].memAddyNeeded;
 
-                    // Send message back saying process' request was granted
+                    // determine page number
+                    pageNum = getPageNum(address);
+
+                    // find empty frame and update it with required info
+                    for (j=0; j < MAX_FRAMES; j++) {
+                        if (frameTable[j].pageNumber == -1) {
+                            frameTable[j].pageNumber = pageNum;
+                            frameTable[j].pid = processTable[i].pid;
+
+                            // add frame to FIFO queue
+                            FIFO_Queue[nextIndex] = j;
+
+                            // increment nextIndex for queue
+                            nextIndex++;
+
+                            // if write set dirty bit
+                            if (!readRequest) frameTable[j].dirtyBit = 1;
+                            break;
+                        }
+                    }
+
+                    // update page table in PCB
+                    processTable[i].pageTable[pageNum] = j;
+                    processTable[i].memAddyNeeded = -1;
+
+                    // display and log message
+                    char m[256];
+                    if (readRequest) {
+                        sprintf(m, "OSS: Address %d in frame %d, giving data to Process %d at time %d:%d\n", address, j, processTable[i].pid, clockPointer->seconds, clockPointer->nanoSeconds );
+                        logMessage(logFile, m);
+                        printf("%s", m);
+                        frameCount++;
+                    } else {
+                        sprintf(m, "OSS: Address %d in frame %d, write data to frame at time %d:%d\n", address, j, clockPointer->seconds, clockPointer->nanoSeconds );
+                        logMessage(logFile, m);
+                        printf("%s", m);
+                        frameCount++;
+                    }
+
+                    //msgsnd: process got granted this memory send message to worker so it can continue
                     buf.mtype = processTable[i].pid;
                     if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
                         perror("OSS: msgsnd to worker failed");
                         exit(1);
-                    } else {
-                        printf("OSS: Granting Process %d request r%d at time %d:%d  (from wait queue)\n", processTable[i].pid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                        char m2[256];
-                        sprintf(m2, "OSS: Granting Process %d request r%d at time %d:%d  (from wait queue)\n", processTable[i].pid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                        logMessage(logFile, m2);
+                    } else break;
+                }
+            }
+            // if frame table is completly filled look in FIFO queue for a process to swap
+        } else {
+            int i, j;
+            int address = 0;
+            int pageNum = 0;
+
+            for (i=0; i < proc; i++) {
+                if (processTable[i].memAddyNeeded != -1) {
+                    // get address
+                    address = processTable[i].memAddyNeeded;
+
+                    // determine page number
+                    pageNum = getPageNum(address);
+
+                    // make sure queue index is not -1
+                    while(1) {
+                        if (FIFO_Queue[queueIndex] == -1) {
+                            queueIndex++;
+                        } else break;
                     }
+
+                    // display/log
+                    char m[256];
+                    sprintf(m, "OSS: Clearing frame %d, and swapping Process %d Page %d\n", FIFO_Queue[queueIndex], processTable[i].pid, pageNum);
+                    logMessage(logFile, m);
+                    printf("%s", m);
+
+                    // clear frame
+                    int frameNum = FIFO_Queue[queueIndex];
+                    int oldPageNum = frameTable[frameNum].pageNumber;
+
+                    frameTable[frameNum].pageNumber = -1;
+                    frameTable[frameNum].pid = 0;
+                    frameTable[frameNum].dirtyBit = 0;
+
+                    // update page table (for old page)
+                    processTable[i].pageTable[oldPageNum] = -1;
+
+                    // increment HeadOfFIFO index and change index to -1
+                    FIFO_Queue[queueIndex] = -1;
+                    queueIndex++;
+
+                    // fill frame with new page from worker
+                    frameTable[frameNum].pageNumber = pageNum;
+                    frameTable[frameNum].pid = processTable[i].pid;
+
+                    // update page table (for new page)
+                    processTable[i].pageTable[pageNum] = frameNum;
+                    processTable[i].memAddyNeeded = -1;
+
+                    // add frame to FIFO queue
+                    FIFO_Queue[nextIndex] = frameNum;
+
+                    // increment nextIndex for queue
+                    nextIndex++;
+
+                    //msgsnd: process got granted this memory send message to worker so it can continue
+                    buf.mtype = processTable[i].pid;
+                    if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+                        perror("OSS: msgsnd to worker failed");
+                        exit(1);
+                    } else break;
+
                 }
             }
         }
 
 
         // Check if message is received and if it is a request or release
-
-        if ( msgrcv(msqid, &buf, sizeof(msgbuffer), 0, IPC_NOWAIT) == -1) {
+// if message from child see if its a request or a release
+        if (msgrcv(msqid, &buf, sizeof(msgbuffer), 0, IPC_NOWAIT) == -1) {
             if (errno == ENOMSG) {
                 continue;
             } else {
@@ -647,18 +593,22 @@ int main(int argc, char** argv) {
                 exit(1);
             }
         } else {
-            if (buf.reqOrRel == 0) {
-                printf("OSS: Detected Process %d requesting r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                char mess[256];
-                sprintf(mess, "OSS: Detected Process %d requesting r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                logMessage(logFile, mess);
-                //request
+            numberOfMemAccesses++;
+            if (buf.writeOrRead == 0) {
+                //read
                 for (int i = 0; i < proc; i++) {
                     if (buf.cPid == processTable[i].pid) {
-                        if (resourceTable[buf.resourceNum].available > 0) {
-                            resourceTable[buf.resourceNum].available--;
-                            processTable[i].allocationTable[buf.resourceNum]++;
-                            immRequest++;
+                        printf("OSS: Process %d requesting read of address %d at time %d:%d\n", buf.cPid, buf.address, clockPointer->seconds, clockPointer->nanoSeconds);
+                        char m[256];
+                        sprintf(m, "OSS: Process %d requesting read of address %d at time %d:%d\n", buf.cPid, buf.address, clockPointer->seconds, clockPointer->nanoSeconds);
+                        logMessage(logFile, m);
+
+                        // determine page number
+                        int pageNum = getPageNum(buf.address);
+
+                        // immediate read, page is already in frame in memory
+                        if (processTable[i].pageTable[pageNum] != -1) {
+
 
                             //msgsnd: process got granted this resource send message to worker
                             buf.mtype = buf.cPid;
@@ -666,44 +616,71 @@ int main(int argc, char** argv) {
                                 perror("OSS: msgsnd to worker failed");
                                 exit(1);
                             } else {
-                                printf("OSS: Granting Process %d request r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
+                                printf("OSS: Address %d in frame %d, giving data to Process %d at time %d:%d\n", buf.address, processTable[i].pageTable[pageNum], buf.cPid, clockPointer->seconds, clockPointer->nanoSeconds);
                                 char m2[256];
-                                sprintf(m2, "OSS: Granting Process %d request r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
+                                sprintf(m2, "OSS: Address %d in frame %d, giving data to Process %d at time %d:%d\n", buf.address, processTable[i].pageTable[pageNum], buf.cPid, clockPointer->seconds, clockPointer->nanoSeconds);
                                 logMessage(logFile, m2);
                             }
+
+
+                            // No available memory, block process and give adress to pcb
                         } else {
-                            processTable[i].resourceNeeded = buf.resourceNum;
-                            blockRequest++;
+                            numberOfPageFaults++;
+                            processTable[i].memAddyNeeded = buf.address;
+                            readRequest = true;
 
                             char mn[256];
-                            sprintf(mn, "OSS: No instances of r%d available, Worker %d added to wait queue at time %d:%d\n", buf.resourceNum, buf.cPid, clockPointer->seconds, clockPointer->nanoSeconds);
+                            sprintf(mn, "OSS: Address %d is not in a memory frame, PAGEFAULT\n", buf.address);
                             logMessage(logFile, mn);
                             printf("%s", mn);
                         }
                     }
                 }
             } else {
-                printf("OSS: Acknowledged Process %d releasing r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                char m3[256];
-                sprintf(m3, "OSS: Acknowledged Process %d releasing r%d at time %d:%d\n", buf.cPid, buf.resourceNum, clockPointer->seconds, clockPointer->nanoSeconds);
-                logMessage(logFile, m3);
-
-                // Free Resources
+                //write
                 for (int i = 0; i < proc; i++) {
                     if (buf.cPid == processTable[i].pid) {
-                        resourceTable[buf.resourceNum].available++;
-                        processTable[i].allocationTable[buf.resourceNum]--;
+                        printf("OSS: Process %d requesting write of address %d at time %d:%d\n", buf.cPid, buf.address, clockPointer->seconds, clockPointer->nanoSeconds);
+                        char m3[256];
+                        sprintf(m3, "OSS: Process %d requesting write of address %d at time %d:%d\n", buf.cPid, buf.address, clockPointer->seconds, clockPointer->nanoSeconds);
+                        logMessage(logFile, m3);
 
-                        // Process Released
-                        buf.mtype = buf.cPid;
-                        if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
-                            perror("OSS: msgsnd to worker failed");
-                            exit(1);
+                        // determine page number
+                        int pageNum = getPageNum(buf.address);
+
+                        // immediate write, page is already in frame in memory
+                        if (processTable[i].pageTable[pageNum] != -1) {
+
+                            // update dirty bit for write
+                            frameTable[pageNum].dirtyBit = 1;
+                            incrementClock(clockPointer, W_INCREMENT);
+
+                            char m[256];
+                            sprintf(m, "OSS: Dirty Bit of frame %d set, adding additional time to the clock", processTable[i].pageTable[pageNum]);
+                            printf("%s", m);
+                            logMessage(logFile, m);
+
+                            // msgsnd: process got released so can send message back to worker
+                            buf.mtype = buf.cPid;
+                            if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+                                perror("OSS: msgsnd to worker failed");
+                                exit(1);
+                            } else {
+                                char m4[256];
+                                sprintf(m4, "OSS: Address %d in frame %d, writing data to frame at time %d:%d\n", buf.address, processTable[i].pageTable[pageNum], clockPointer->seconds, clockPointer->nanoSeconds);
+                                logMessage(logFile, m4);
+                                printf("%s", m4);
+                            }
+                            // page fault (page needed is not in main memory)
                         } else {
-                            printf("OSS: Resources Released : r%d:1\n", buf.resourceNum);
-                            char m4[256];
-                            sprintf(m4, "OSS: Resources Released : r%d:1\n", buf.resourceNum);
-                            logMessage(logFile, m4);
+                            numberOfPageFaults++;
+                            processTable[i].memAddyNeeded = buf.address;
+                            readRequest = false;
+
+                            char mn[256];
+                            sprintf(mn, "OSS: Address %d is not in a memory frame, PAGEFAULT\n", buf.address);
+                            logMessage(logFile, mn);
+                            printf("%s", mn);
                         }
                     }
                 }
@@ -711,68 +688,25 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Print Final Process Table and Final Stats
+    // Print final PCB and available memory
     char mess9[256];
     sprintf(mess9, "\nFinal PCB Table:\n");
     printf("%s", mess9);
     logMessage(logFile, mess9);
     procTableDisplay(logFile, clockPointer, processTable, proc);
-    logAvailableResource(logFile, resourceTable);
+    logFrameTable(logFile, frameTable);
 
-    // Final Stats
-    char mess[256];
+    // print and calulate stats
+    char m[256];
+    sprintf(m, "\nSTATS:\n----------------------------------------------\nTotal number of memory accesses per second: %f\n", (float) numberOfMemAccesses / clockPointer->seconds);
+    printf("%s", m);
+    logMessage(logFile, m);
 
-    // Total Requests
-    sprintf(mess, "\nSTATS:\n----------------------------------------------\nTotal number of immediate request: %d\n", immRequest);
-    printf("%s", mess);
-    logMessage(logFile, mess);
+    sprintf(m, "Page Faults per Memory Access = %f\n", (float) numberOfPageFaults / numberOfMemAccesses);
+    printf("%s", m);
+    logMessage(logFile, m);
 
-    // Total Rejected Request
-    sprintf(mess, "Total number of blocked request: %d\n", blockRequest);
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-    // Total number of processes terminated in deadlock
-    sprintf(mess, "Total number of process terminated by deadlock detection algorithm: %d\n", deadlockTerm);
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-    // Total successful terminations
-    int newProc = 0;
-    for (int i = 0; i < proc; i++) {
-        if (processTable[i].pid != 0) {
-            newProc++;
-        }
-    }
-
-    sprintf(mess, "Total number of process terminated successfully: %d\n", (newProc - deadlockTerm));
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-    // Total runs of the algorithm
-    sprintf(mess, "Total number of times deadlock detection algorithm was ran: %d\n", deadlockDetectionCount);
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-    // Total stuck processes in deadlock
-    sprintf(mess, "Total number of processes stuck in deadlock throughout execution: %d\n", deadlockProcesses);
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-    // Percentage of processes in a deadlock that had to be terminated on an average
-    // Ensure that deadlockProcesses is not zero to avoid division by zero
-    if (deadlockProcesses > 0) {
-        float percentage = ((float)deadlockTerm / deadlockProcesses) * 100;
-        sprintf(mess, "Percentage of processes in a deadlock that had to be terminated: %.2f%%\n", percentage);
-    } else {
-        sprintf(mess, "No deadlock processes were detected.\n");
-    }
-
-    printf("%s", mess);
-    logMessage(logFile, mess);
-
-
-    // Clean up and Detach from SHM
+    // do clean up
     for(int i=0; i < proc; i++) {
         if(processTable[i].occupied == 1) {
             kill(processTable[i].pid, SIGKILL);
@@ -780,13 +714,19 @@ int main(int argc, char** argv) {
     }
 
 
+    //detach from shared memory
+    shmdt(clockPointer);
+
 
     if (msgctl(msqid, IPC_RMID, NULL) == -1) {
         perror("oss.c: msgctl to get rid of queue, failed\n");
         exit(1);
     }
 
-
+    if (shmctl(shmid, IPC_RMID, NULL) == -1) {
+        perror("oss.c: shmctl to get rid or shared memory, failed\n");
+        exit(1);
+    }
 
     shmdt(clockPointer);
 

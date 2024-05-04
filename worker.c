@@ -1,4 +1,4 @@
-// Kanaan Sullivan 4760 Proj 5
+// Kanaan Sullivan 4760 Proj 6
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -15,9 +15,8 @@
 #include "oss.h"
 
 // Globals
-#define TERM_NANO 25000000
+#define R_MAX 32768
 
-int allocationTable[MAX_RS] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
 int main(int argc, char ** argv) {
     // declare variables
@@ -26,8 +25,9 @@ int main(int argc, char ** argv) {
     int msqid = 0; // messageQueueID
     key_t key;
     buf.mtype = 1;
-    buf.reqOrRel; //Request or Release given resources (0 for request, 1 for release)
-    buf.resourceNum; //Resource 0-9 (10 resources)
+    buf.writeOrRead;
+    buf.address;
+    buf.cPid = getpid();
 
     // Seed the random number generator with the current time and the PID
     srand(time(NULL) ^ (getpid()<<16));
@@ -67,115 +67,70 @@ int main(int argc, char ** argv) {
     }
 
     // main loop: Variables
-    int oneSec = clockPointer->seconds + 1;
-    //bool request = false;
-    bool msgReady = false;
-    int available = 200;
-    int relNum = 0;
-    int reqNum = 0;
-
-    // generate a random number in the range [0, B]
-    int itsTime = 100000;
+    int address = 0;
+    int memRefCount = 0;
+    bool terminate = false;
 
     // main loop: while(notDone)
     while(1) {
-        // check if it is time to request/release
-        if ((clockPointer->nanoSeconds % (int)(itsTime)) == 0) {
+        // generate a random number between 0 and 100
+        int randPercent = rand() % 101;
 
-            // generate a random number between 0 and 100
-            int randPercent = rand() % 101;
+        // random number in between [0, 32767]
+        int address = rand() % R_MAX;
 
-            // Request or Release?
-            if ((randPercent < 80) && (available > 0)) {
-                // 80% probability: Processes will request a resource (0 for request)
-                while(1) {
-                    // random number in between [0, 9]
-                    reqNum = rand() % MAX_RS;
 
-                    // check to make sure you don't request more than 20 instance of a resource
-                    if (allocationTable[reqNum] < MAX_IN) {
-                        break;
-                    }
-                }
+        // Request or Release?
+        if (randPercent < 90) {
+            // 90% probability: Processes will request a resource (0 for request)
+            buf.writeOrRead = 0;
+            buf.address = address;
 
-                buf.reqOrRel = 0;
-                buf.resourceNum = reqNum;
+            printf("-> WORKER %d: Request memory address %d (READ)\n", getpid(), address);
 
-                msgReady = true;
+            // increment memory reference count
+            memRefCount++;
+        } else {
+            // 10% probability: Processes will release a resource (1 for release)
+            buf.writeOrRead = 1;
+            buf.address = address;
 
-                available--;
-                allocationTable[reqNum]++;
+            printf("-> WORKER %d: Request memory address %d (WRITE)\n", getpid(), address);
 
-                printf("-> WORKER %d: Request r%d\n", getpid(), reqNum);
+            // increment memory reference count
+            memRefCount++;
+        }
 
-            } else if (randPercent > 79 && available < 200) {
-                // 20% probability: Processes will release a resource (1 for release)
-                while(1) {
-                    // random number in between [0, 9]
-                    relNum = rand() % MAX_RS;
 
-                    // check to make sure there is a resource to release
-                    if (allocationTable[relNum] > 0) {
-                        break;
-                    }
-                }
+        // message send with request/release of which resource number
+        // change buf type to parent process id (ppid)
+        buf.mtype = getppid();
+        buf.cPid = getpid();
 
-                buf.reqOrRel = 1;
-                buf.resourceNum = relNum;
+        // message send of if request or releasing and which resource
+        if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
+            printf("-> WORKER %d: msgsnd to oss failed\n", getpid());
+            exit(1);
+        } else {
+            printf("-> WORKER %d: Message sent to parent\n", getpid());
+        }
 
-                msgReady = true;
-
-                available++;
-                allocationTable[relNum]--;
-
-                printf("-> WORKER %d: Release r%d\n", getpid(), relNum);
-
-            } else {
-                msgReady = false;
-            }
-
-            // message send with request/release of which resource number
-            // change buf type to parent process id (ppid)
-            buf.mtype = getppid();
-            buf.cPid = getpid();
-
-            if (msgReady == true) {
-                // message send of if request or releasing and which resource
-                if (msgsnd(msqid, &buf, sizeof(msgbuffer)-sizeof(long), 0) == -1) {
-                    printf("-> WORKER %d: msgsnd to oss failed\n", getpid());
-                    exit(1);
-                } else {
-                    printf("-> WORKER %d: Message sent to parent\n", getpid());
-                }
-                // message recieve if that resource was granted or that resource got released
-                if ( msgrcv(msqid, &buf, sizeof(msgbuffer), getpid(), 0) == -1) {
-                    printf("-> WORKER %d: failed to receive message from oss\n", getpid());
-                    exit(1);
-                } else {
-                    printf("-> WORKER %d: Message recieved from Parent (Release or Request granted)\n", getpid());
-                }
-            }
-
-        }// end of req/rel if statement
+        // message recieve if that resource was granted or that resource got released
+        if ( msgrcv(msqid, &buf, sizeof(msgbuffer), getpid(), 0) == -1) {
+            printf("-> WORKER %d: failed to receive message from oss\n", getpid());
+            exit(1);
+        } else {
+            printf("-> WORKER %d: Message recieved from Parent (Read or Write Granted)\n", getpid());
+        }
 
 
         // check if it is time to terminate
-        // make sure it ran for a least a second
-        if (clockPointer->seconds > oneSec) {
-            // every 250ms check to terminate
-            if((clockPointer->nanoSeconds % TERM_NANO) == 0 ) {
-                //printf("-> WORKER %d: Checking if time to terminate\n", getpid());
+        if ((memRefCount % 100) == 0) terminate = true;
 
-                // 3% chance of termination
-                // generate a random number between 0 and 100
-                int randPercent2 = rand() % 101;
-
-                if (randPercent2 < 4) {
-                    printf("-> WORKER: End of worker %d\n", getpid());
-                    return EXIT_SUCCESS;
-                }
-            }
-        }// end of time to terminate if statement
-    } // end of main loop
-
+        // 30% chance of termination after 1000 references
+        if (randPercent < 50 && terminate) {
+            printf("-> WORKER: End of worker %d\n", getpid());
+            return EXIT_SUCCESS;
+        }
+    }
 }
